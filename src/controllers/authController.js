@@ -53,8 +53,8 @@ async function register(req, res) {
         }
 
         // Step 4: Password aur withdraw password ko encrypt karna
-        const passwordHash = await hashPassword(password);
-        const withdrawPasswordHash = await hashPassword(withdrawPassword);
+        const passwordHash = await hashPassword(password.trim());
+        const withdrawPasswordHash = await hashPassword(withdrawPassword.trim());
 
         // Step 5: Naye user ke liye uska apna referral code generate karna
         // (loop taake agar wo code already exist kare to dobara try ho)
@@ -122,7 +122,7 @@ async function login(req, res) {
         const user = result.rows[0];
 
         // Password check karna
-        const isPasswordCorrect = await comparePassword(password, user.password_hash);
+        const isPasswordCorrect = await comparePassword(password.trim(), user.password_hash);
         if (!isPasswordCorrect) {
             return res.status(401).json({
                 success: false,
