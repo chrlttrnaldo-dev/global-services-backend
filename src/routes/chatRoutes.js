@@ -15,6 +15,7 @@ const {
     adminVerifyAndReward,
     adminApprovePremiumUnlock,
     adminApproveReferralUnlock,
+    deleteMessageImage,
 } = require('../controllers/chatController');
 
 // ============================================
@@ -54,5 +55,6 @@ router.post('/admin/:conversationId/set-password', verifyToken, verifyAdmin, adm
 router.post('/admin/:conversationId/verify-reward', verifyToken, verifyAdmin, adminVerifyAndReward); // Balance add karna (task/deposit)
 router.post('/admin/:conversationId/approve-premium', verifyToken, verifyAdmin, adminApprovePremiumUnlock); // Premium unlock
 router.post('/admin/:conversationId/approve-referral', verifyToken, verifyAdmin, adminApproveReferralUnlock); // Referral unlock
+router.delete('/admin/message/:messageId/image', verifyToken, verifyAdmin, deleteMessageImage); // Image delete karna (deposit chat ke alawa)
 
 module.exports = router;

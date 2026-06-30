@@ -9,6 +9,22 @@
 const pool = require('../config/database');
 const { createNotification } = require('./notificationController');
 const { hashPassword } = require('../utils/passwordHelper');
+const cloudinary = require('../config/cloudinary');
+
+// ============================================
+// Helper: Cloudinary image URL se uska "public_id"
+// nikalna (taake cloudinary.uploader.destroy() ko
+// sahi value di ja sake aur Cloudinary se bhi
+// image hamesha ke liye delete ho)
+// ============================================
+function extractCloudinaryPublicId(url) {
+    try {
+        const match = url.match(/\/upload\/(?:v\d+\/)?(.+)\.[a-zA-Z0-9]+(?:\?.*)?$/);
+        return match ? match[1] : null;
+    } catch (err) {
+        return null;
+    }
+}
 
 // ============================================
 // USER: Nayi conversation shuru karna
@@ -424,6 +440,72 @@ async function adminApproveReferralUnlock(req, res) {
     }
 }
 
+// ============================================
+// ADMIN: Ek message ki image delete karna
+// (Cloudinary se bhi aur database se bhi)
+// RULE: Deposit chat ('deposit_request') ki images
+// kabhi delete nahi hongi — yeh payment proof hai,
+// safe rehni chahiye. Baqi har chat type mein
+// CS image delete kar sakta hai.
+// ============================================
+async function deleteMessageImage(req, res) {
+    try {
+        const { messageId } = req.params;
+
+        const result = await pool.query(
+            `SELECT m.*, c.conversation_type
+             FROM messages m
+             JOIN conversations c ON m.conversation_id = c.id
+             WHERE m.id = $1`,
+            [messageId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Message not found.' });
+        }
+
+        const message = result.rows[0];
+
+        if (!message.image_url) {
+            return res.status(400).json({ success: false, message: 'This message has no image.' });
+        }
+
+        // Deposit chat ki images kabhi delete nahi karni — payment proof safe rakhna zaroori hai
+        if (message.conversation_type === 'deposit_request') {
+            return res.status(403).json({ success: false, message: 'Deposit chat images cannot be deleted.' });
+        }
+
+        // Cloudinary se bhi delete karna (sirf DB se hatana kaafi nahi, warna storage bharta rahega)
+        const publicId = extractCloudinaryPublicId(message.image_url);
+        if (publicId) {
+            try {
+                await cloudinary.uploader.destroy(publicId);
+            } catch (cloudErr) {
+                console.error('Cloudinary delete error (DB se hata rahe hain phir bhi):', cloudErr);
+            }
+        }
+
+        await pool.query('UPDATE messages SET image_url = NULL WHERE id = $1', [messageId]);
+
+        // Real-time: doosri taraf (user ka chat ya doosra admin tab) ko bhi turant batana
+        if (req.io) {
+            req.io.to(`conversation_${message.conversation_id}`).emit('message_image_deleted', {
+                messageId: message.id,
+                conversationId: message.conversation_id,
+            });
+            req.io.to('admin_room').emit('message_image_deleted', {
+                messageId: message.id,
+                conversationId: message.conversation_id,
+            });
+        }
+
+        return res.status(200).json({ success: true, message: 'Image deleted.' });
+    } catch (error) {
+        console.error('Delete message image error:', error);
+        return res.status(500).json({ success: false, message: 'Something went wrong.' });
+    }
+}
+
 module.exports = {
     startConversation,
     getMyConversations,
@@ -435,4 +517,5 @@ module.exports = {
     adminVerifyAndReward,
     adminApprovePremiumUnlock,
     adminApproveReferralUnlock,
+    deleteMessageImage,
 };
