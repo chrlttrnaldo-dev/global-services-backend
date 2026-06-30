@@ -72,7 +72,8 @@ async function getUserFullProfile(req, res) {
 
         // 2. My Shop history (listed, sold, processing, delivered, lost - sab)
         const shopResult = await pool.query(
-            `SELECT ms.*, p.product_name, p.selling_price
+            `SELECT ms.*, p.product_name, p.cost_price, p.profit_percentage, p.selling_price,
+                    (p.selling_price - p.cost_price) AS profit_amount
              FROM my_shop ms
              JOIN products p ON ms.product_id = p.id
              WHERE ms.user_id = $1
