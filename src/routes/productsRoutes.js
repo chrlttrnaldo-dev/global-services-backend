@@ -1,12 +1,14 @@
 // ============================================
 // PRODUCTS ROUTES
-// Delete route add kiya - Cloudinary nahi
+// Ab Cloudinary use ho raha hai image upload ke liye
+// (pehle local disk tha — Railway restart par delete ho jata tha)
 // ============================================
 
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const path = require('path');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const cloudinary = require('../config/cloudinary');
 const { verifyToken, verifyAdmin } = require('../middleware/authMiddleware');
 const {
     createProduct,
@@ -16,12 +18,13 @@ const {
     deleteProduct,
 } = require('../controllers/productsController');
 
-// Multer setup - original wala
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, 'uploads/products/'),
-    filename: (req, file, cb) => {
-        const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`;
-        cb(null, uniqueName);
+// Cloudinary storage setup
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'global-services/products',
+        allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+        resource_type: 'image',
     },
 });
 const upload = multer({ storage });
@@ -31,7 +34,8 @@ router.post('/admin/upload-image', verifyToken, verifyAdmin, upload.single('imag
     if (!req.file) {
         return res.status(400).json({ success: false, message: 'Image file zaroori hai.' });
     }
-    const imageUrl = `/uploads/products/${req.file.filename}`;
+    // req.file.path Cloudinary ka full secure URL hota hai
+    const imageUrl = req.file.path;
     return res.status(200).json({ success: true, imageUrl });
 });
 

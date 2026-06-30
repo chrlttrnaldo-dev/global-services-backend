@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const path = require('path');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const cloudinary = require('../config/cloudinary');
 const { verifyToken, verifyAdmin } = require('../middleware/authMiddleware');
 const {
     startConversation,
@@ -16,12 +17,16 @@ const {
     adminApproveReferralUnlock,
 } = require('../controllers/chatController');
 
-// Chat image upload setup
-const chatImageStorage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, 'uploads/chat/'),
-    filename: (req, file, cb) => {
-        const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`;
-        cb(null, uniqueName);
+// ============================================
+// Chat image upload setup — ab Cloudinary par
+// (pehle local disk 'uploads/chat/' tha)
+// ============================================
+const chatImageStorage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'global-services/chat',
+        allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+        resource_type: 'image',
     },
 });
 const uploadChatImage = multer({ storage: chatImageStorage });
@@ -31,7 +36,8 @@ router.post('/upload-image', verifyToken, uploadChatImage.single('image'), (req,
     if (!req.file) {
         return res.status(400).json({ success: false, message: 'Image file is required.' });
     }
-    const imageUrl = `/uploads/chat/${req.file.filename}`;
+    // req.file.path Cloudinary ka full secure URL hota hai (multer-storage-cloudinary deta hai)
+    const imageUrl = req.file.path;
     return res.status(200).json({ success: true, imageUrl });
 });
 

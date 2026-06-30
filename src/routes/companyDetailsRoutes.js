@@ -1,20 +1,24 @@
 // ============================================
 // COMPANY DETAILS ROUTES
+// Ab Cloudinary use ho raha hai file upload ke liye
+// (pehle local disk tha — Railway restart par delete ho jata tha)
 // ============================================
 
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const path = require('path');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const cloudinary = require('../config/cloudinary');
 const { verifyToken, verifyAdmin } = require('../middleware/authMiddleware');
 const { getCompanyDetails, updateCompanyDetails } = require('../controllers/companyDetailsController');
 
-// Multer setup - products wala hi pattern (local disk)
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, 'uploads/company/'),
-    filename: (req, file, cb) => {
-        const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`;
-        cb(null, uniqueName);
+// Cloudinary storage setup — resource_type 'auto' rakha hai
+// kyunki yahan image (jpg/png) aur document (pdf/doc) dono aa sakte hain.
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'global-services/company',
+        resource_type: 'auto',
     },
 });
 const upload = multer({ storage });
@@ -24,7 +28,8 @@ router.post('/admin/upload', verifyToken, verifyAdmin, upload.single('file'), (r
     if (!req.file) {
         return res.status(400).json({ success: false, message: 'File zaroori hai.' });
     }
-    const fileUrl = `/uploads/company/${req.file.filename}`;
+    // req.file.path Cloudinary ka full secure URL hota hai
+    const fileUrl = req.file.path;
     return res.status(200).json({ success: true, fileUrl, fileName: req.file.originalname });
 });
 
