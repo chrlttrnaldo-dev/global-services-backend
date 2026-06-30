@@ -24,6 +24,7 @@ const appOptimizationRoutes = require('./routes/appOptimizationRoutes');
 const getYourGuideRoutes = require('./routes/getYourGuideRoutes');
 const referralCodeRoutes = require('./routes/referralCodeRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
+const companyDetailsRoutes = require('./routes/companyDetailsRoutes');
 
 const app = express();
 const server = http.createServer(app); // Express ko ek "raw" server mein wrap karna, taake Socket.io bhi isi par chal sake
@@ -47,6 +48,7 @@ app.use('/uploads', express.static('uploads')); // Upload ki hui images ko serve
 const fs = require('fs');
 if (!fs.existsSync('uploads/chat')) fs.mkdirSync('uploads/chat', { recursive: true });
 if (!fs.existsSync('uploads/products')) fs.mkdirSync('uploads/products', { recursive: true });
+if (!fs.existsSync('uploads/company')) fs.mkdirSync('uploads/company', { recursive: true });
 
 // Har request ke saath "io" (socket) ko attach karna,
 // taake controllers (jaise chatController) usay use kar sakein
@@ -70,6 +72,7 @@ app.use('/api/app-optimization-tasks', appOptimizationRoutes);
 app.use('/api/getyourguide-task', getYourGuideRoutes);
 app.use('/api/referral-codes', referralCodeRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/company-details', companyDetailsRoutes);
 
 app.get('/', (req, res) => {
     res.json({ message: 'Server is running. 🚀' });
