@@ -107,7 +107,21 @@ async function markAsProcessing(req, res) {
         );
 
         if (req.io) {
-            req.io.to('admin_room').emit('order_processing', { shopItemId, userId });
+            const infoResult = await pool.query(
+                `SELECT u.full_name, p.product_name
+                 FROM my_shop ms
+                 JOIN users u ON ms.user_id = u.id
+                 JOIN products p ON ms.product_id = p.id
+                 WHERE ms.id = $1`,
+                [shopItemId]
+            );
+            const info = infoResult.rows[0] || {};
+            req.io.to('admin_room').emit('order_processing', {
+                shopItemId,
+                userId,
+                userName: info.full_name,
+                productName: info.product_name,
+            });
         }
 
         return res.status(200).json({ success: true, message: 'Processing confirmed. Admin will verify shortly.' });
