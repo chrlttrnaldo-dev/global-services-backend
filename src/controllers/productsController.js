@@ -12,6 +12,14 @@ async function createProduct(req, res) {
              VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
             [productName, productLink, description || null, iconImageUrl || null, costPrice, profitPercentage, sellingPrice.toFixed(2)]
         );
+
+        // Sab connected users ko batana ke naya product aaya hai
+        // (taake unki "Browse Products" list automatically refresh ho jaye
+        // aur "List" button dobara enable ho agar pehle disabled tha)
+        if (req.io) {
+            req.io.emit('new_product', result.rows[0]);
+        }
+
         return res.status(201).json({ success: true, product: result.rows[0] });
     } catch (error) {
         console.error('Create product error:', error);
@@ -31,11 +39,24 @@ async function getAllProductsAdmin(req, res) {
 
 async function getAllProductsUser(req, res) {
     try {
+        const userId = req.user.userId;
+
+        // Sirf woh products dikhane hain jo:
+        // 1) active hain
+        // 2) is user ne abhi tak my_shop mein list NAHI kiye
+        // Isse "List All" karne ke baad Browse Products automatically khali ho jata hai,
+        // aur jab CS naya product upload kare to wahi naya product yahan wapas nazar aata hai
         const result = await pool.query(
-            `SELECT id, product_name, product_link, description, icon_image_url,
-                    cost_price, profit_percentage, selling_price,
-                    (selling_price - cost_price) AS profit_amount
-             FROM products WHERE is_active = TRUE ORDER BY created_at DESC`
+            `SELECT p.id, p.product_name, p.product_link, p.description, p.icon_image_url,
+                    p.cost_price, p.profit_percentage, p.selling_price,
+                    (p.selling_price - p.cost_price) AS profit_amount
+             FROM products p
+             WHERE p.is_active = TRUE
+             AND NOT EXISTS (
+                 SELECT 1 FROM my_shop ms WHERE ms.product_id = p.id AND ms.user_id = $1
+             )
+             ORDER BY p.created_at DESC`,
+            [userId]
         );
         return res.status(200).json({ success: true, products: result.rows });
     } catch (error) {

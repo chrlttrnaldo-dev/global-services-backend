@@ -7,6 +7,7 @@ const router = express.Router();
 const { verifyToken, verifyAdmin } = require('../middleware/authMiddleware');
 const {
     listProduct,
+    listAllProducts,
     getMyShop,
     markAsProcessing,
     getAllShopEntriesAdmin,
@@ -18,6 +19,7 @@ const {
 
 // --- USER routes ---
 router.post('/list', verifyToken, listProduct);                              // Product ko shop mein add karna
+router.post('/list-all', verifyToken, listAllProducts);                      // Saare available products ek saath list karna
 router.get('/my-shop', verifyToken, getMyShop);                               // Apni shop dekhna
 router.post('/:shopItemId/processing', verifyToken, markAsProcessing);       // "Processing" button
 

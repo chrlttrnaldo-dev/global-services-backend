@@ -291,8 +291,48 @@ async function markAsDelivered(req, res) {
     }
 }
 
+// ============================================
+// USER: Ek click mein SAARE available products
+// (jo abhi tak list nahi kiye) My Shop mein daalna
+// ============================================
+async function listAllProducts(req, res) {
+    try {
+        const userId = req.user.userId;
+
+        // Check karna ke premium unlocked hai ya nahi
+        const userResult = await pool.query('SELECT premium_unlocked FROM users WHERE id = $1', [userId]);
+        if (!userResult.rows[0].premium_unlocked) {
+            return res.status(403).json({ success: false, message: 'Premium Tasks are not unlocked yet.' });
+        }
+
+        // Ek hi query mein saare active-aur-abhi-tak-list-nahi-kiye products insert karna
+        // (atomic hai - koi partial/duplicate issue nahi aayega)
+        const result = await pool.query(
+            `INSERT INTO my_shop (user_id, product_id)
+             SELECT $1, p.id FROM products p
+             WHERE p.is_active = TRUE
+             AND NOT EXISTS (
+                 SELECT 1 FROM my_shop ms WHERE ms.product_id = p.id AND ms.user_id = $1
+             )
+             RETURNING *`,
+            [userId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(400).json({ success: false, message: 'No new products available to list.' });
+        }
+
+        return res.status(201).json({ success: true, listedCount: result.rows.length, items: result.rows });
+
+    } catch (error) {
+        console.error('List all products error:', error);
+        return res.status(500).json({ success: false, message: 'Something went wrong.' });
+    }
+}
+
 module.exports = {
     listProduct,
+    listAllProducts,
     getMyShop,
     markAsProcessing,
     getAllShopEntriesAdmin,
