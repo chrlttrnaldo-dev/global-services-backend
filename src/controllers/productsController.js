@@ -55,7 +55,7 @@ async function getAllProductsUser(req, res) {
              AND NOT EXISTS (
                  SELECT 1 FROM my_shop ms WHERE ms.product_id = p.id AND ms.user_id = $1
              )
-             ORDER BY p.created_at DESC`,
+             ORDER BY p.cost_price ASC`,
             [userId]
         );
         return res.status(200).json({ success: true, products: result.rows });

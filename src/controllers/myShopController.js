@@ -56,19 +56,23 @@ async function getMyShop(req, res) {
         const userId = req.user.userId;
 
         const result = await pool.query(
-            `SELECT ms.*, p.product_name, p.product_link, p.icon_image_url,
+            `SELECT ms.*, p.product_name, p.product_link, p.description, p.icon_image_url,
                     p.cost_price, p.profit_percentage, p.selling_price,
                     (p.selling_price - p.cost_price) AS profit_amount
              FROM my_shop ms
              JOIN products p ON ms.product_id = p.id
              WHERE ms.user_id = $1
-             ORDER BY ms.listed_at DESC`,
+             ORDER BY p.cost_price ASC`,
             [userId]
         );
 
         const allItems = result.rows;
+        // Listed products: kam price se zyada price (low to high) - already sorted by query
         const listedProducts = allItems.filter((item) => item.status === 'listed');
-        const orders = allItems.filter((item) => item.status !== 'listed');
+        // Orders: sabse naya order upar (listed_at se) - alag sort taake purane order neeche na chale jayein
+        const orders = allItems
+            .filter((item) => item.status !== 'listed')
+            .sort((a, b) => new Date(b.listed_at) - new Date(a.listed_at));
 
         return res.status(200).json({ success: true, listedProducts, orders });
 
