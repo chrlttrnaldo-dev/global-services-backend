@@ -200,34 +200,79 @@ async function markAsSold(req, res) {
 // ============================================
 // ADMIN: Order Approve karna ("Ready to Ship")
 // CS ke paas HAMESHA yeh button available hai - koi status check nahi
+// NAYA: Approve hote hi product ka cost_price user ke balance se
+// MINUS ho jata hai (sirf EK dafa - cost_deducted flag se protect hai,
+// taake CS dobara button dabaye ya status wapas/aage-peeche ho to
+// paisa dobara na katay). Yeh amount delivered hone par cost+profit
+// ke sath wapas milega.
 // ============================================
 async function approveOrder(req, res) {
     try {
         const { shopItemId } = req.params;
         const { expectedDeliveryDate } = req.body;
 
-        const itemResult = await pool.query('SELECT * FROM my_shop WHERE id = $1', [shopItemId]);
+        const itemResult = await pool.query(
+            `SELECT ms.*, p.cost_price, p.product_name
+             FROM my_shop ms JOIN products p ON ms.product_id = p.id
+             WHERE ms.id = $1`,
+            [shopItemId]
+        );
         if (itemResult.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Order not found.' });
         }
 
+        const item = itemResult.rows[0];
+        const userId = item.user_id;
+        const costPrice = parseFloat(item.cost_price);
+        const alreadyDeducted = item.cost_deducted === true;
+
         const result = await pool.query(
-            `UPDATE my_shop SET status = 'ready_to_ship', ready_to_ship_at = NOW(), expected_delivery_date = $1
+            `UPDATE my_shop SET status = 'ready_to_ship', ready_to_ship_at = NOW(), expected_delivery_date = $1,
+                    cost_deducted = TRUE
              WHERE id = $2 RETURNING *`,
             [expectedDeliveryDate || null, shopItemId]
         );
 
-        const userId = itemResult.rows[0].user_id;
+        let newBalance = null;
+        if (!alreadyDeducted) {
+            // Balance se product ka cost minus karna
+            const userResult = await pool.query('SELECT balance FROM users WHERE id = $1', [userId]);
+            newBalance = (parseFloat(userResult.rows[0].balance) - costPrice).toFixed(2);
+            await pool.query('UPDATE users SET balance = $1 WHERE id = $2', [newBalance, userId]);
 
-        // Notification banana
-        const notif = await createNotification(userId, 'Order Ready to Ship!', 'Your order has been approved and is ready to ship.');
+            // History mein record karna (red/negative entry)
+            await pool.query(
+                `INSERT INTO balance_history (user_id, amount, reason, balance_after)
+                 VALUES ($1, $2, $3, $4)`,
+                [userId, -costPrice, `Order ready to ship - product cost deducted (${item.product_name})`, newBalance]
+            );
+        }
+
+        // Notification banana - user-facing hai isliye ENGLISH mein
+        const notifMsg = alreadyDeducted
+            ? `Your order for "${item.product_name}" has been approved and is ready to ship.`
+            : `Your order for "${item.product_name}" is ready to ship. $${costPrice.toFixed(2)} has been deducted from your balance. This amount will be returned to you along with the profit once the order is delivered.`;
+        const notif = await createNotification(userId, 'Order Ready to Ship!', notifMsg);
 
         if (req.io) {
             req.io.to(`user_${userId}`).emit('order_approved', result.rows[0]);
             req.io.to(`user_${userId}`).emit('new_notification', notif.rows[0]);
+            if (!alreadyDeducted) {
+                req.io.to(`user_${userId}`).emit('balance_updated', {
+                    amount: -costPrice,
+                    newBalance,
+                    reason: 'Order ready to ship - product cost deducted',
+                    isDeduction: true,
+                });
+            }
         }
 
-        return res.status(200).json({ success: true, message: 'Order approved - Ready to Ship.' });
+        return res.status(200).json({
+            success: true,
+            message: alreadyDeducted
+                ? 'Order updated - Ready to Ship (cost was already deducted earlier).'
+                : `Order approved - Ready to Ship. $${costPrice.toFixed(2)} deducted from user balance.`,
+        });
 
     } catch (error) {
         console.error('Approve order error:', error);
@@ -276,32 +321,79 @@ async function markAsLost(req, res) {
 // ============================================
 // ADMIN: Order "Delivered" mark karna
 // CS ke paas HAMESHA yeh button available hai - koi status check nahi
+// NAYA: Delivered mark hote hi cost_price + profit_amount dono
+// user ke balance mein WAPAS ADD ho jate hain (sirf EK dafa -
+// payout_added flag se protect hai, taake CS dobara button dabaye
+// to paisa dobara add na ho).
 // ============================================
 async function markAsDelivered(req, res) {
     try {
         const { shopItemId } = req.params;
 
-        const itemResult = await pool.query('SELECT * FROM my_shop WHERE id = $1', [shopItemId]);
+        const itemResult = await pool.query(
+            `SELECT ms.*, p.cost_price, p.selling_price, p.product_name,
+                    (p.selling_price - p.cost_price) AS profit_amount
+             FROM my_shop ms JOIN products p ON ms.product_id = p.id
+             WHERE ms.id = $1`,
+            [shopItemId]
+        );
         if (itemResult.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Order not found.' });
         }
 
+        const item = itemResult.rows[0];
+        const userId = item.user_id;
+        const costPrice = parseFloat(item.cost_price);
+        const profitAmount = parseFloat(item.profit_amount);
+        const totalReturn = costPrice + profitAmount;
+        const alreadyPaidOut = item.payout_added === true;
+
         const result = await pool.query(
-            "UPDATE my_shop SET status = 'delivered', delivered_at = NOW() WHERE id = $1 RETURNING *",
+            `UPDATE my_shop SET status = 'delivered', delivered_at = NOW(), payout_added = TRUE
+             WHERE id = $1 RETURNING *`,
             [shopItemId]
         );
 
-        const userId = itemResult.rows[0].user_id;
+        let newBalance = null;
+        if (!alreadyPaidOut) {
+            // Balance mein cost + profit wapas add karna
+            const userResult = await pool.query('SELECT balance FROM users WHERE id = $1', [userId]);
+            newBalance = (parseFloat(userResult.rows[0].balance) + totalReturn).toFixed(2);
+            await pool.query('UPDATE users SET balance = $1 WHERE id = $2', [newBalance, userId]);
 
-        // Notification banana
-        const notif = await createNotification(userId, 'Order Delivered!', 'Your order has been marked as delivered. Thank you!');
+            // History mein record karna (green/positive entry)
+            await pool.query(
+                `INSERT INTO balance_history (user_id, amount, reason, balance_after)
+                 VALUES ($1, $2, $3, $4)`,
+                [userId, totalReturn, `Order delivered - cost + profit added (${item.product_name})`, newBalance]
+            );
+        }
+
+        // Notification banana - user-facing hai isliye ENGLISH mein
+        const notifMsg = alreadyPaidOut
+            ? `Your order for "${item.product_name}" has been marked as delivered. Thank you!`
+            : `Your order for "${item.product_name}" has been delivered. $${totalReturn.toFixed(2)} (cost $${costPrice.toFixed(2)} + profit $${profitAmount.toFixed(2)}) has been added to your balance. Thank you!`;
+        const notif = await createNotification(userId, 'Order Delivered!', notifMsg);
 
         if (req.io) {
             req.io.to(`user_${userId}`).emit('order_delivered', result.rows[0]);
             req.io.to(`user_${userId}`).emit('new_notification', notif.rows[0]);
+            if (!alreadyPaidOut) {
+                req.io.to(`user_${userId}`).emit('balance_updated', {
+                    amount: totalReturn,
+                    newBalance,
+                    reason: 'Order delivered - cost + profit added',
+                    isDeduction: false,
+                });
+            }
         }
 
-        return res.status(200).json({ success: true, message: 'Order marked as Delivered.' });
+        return res.status(200).json({
+            success: true,
+            message: alreadyPaidOut
+                ? 'Order already marked as Delivered earlier (no duplicate payout).'
+                : `Order marked as Delivered. $${totalReturn.toFixed(2)} (cost + profit) added to user balance.`,
+        });
 
     } catch (error) {
         console.error('Mark as delivered error:', error);

@@ -19,10 +19,18 @@ async function getAllUsers(req, res) {
     try {
         const { search } = req.query; // search by name, email, ya ID
 
+        // NAYA: har user ke saath uske my_shop items mein se
+        // "ready_to_ship" aur "delivered" ka count bhi nikal rahe hain,
+        // taake CS ko user list mein hi (profile khole bina) pata chal jaye
+        // ke kis user ke products abhi ready to ship hain aur kis user ke
+        // delivered ho chuke hain.
         let query = `
-            SELECT id, full_name, email, balance, is_admin, premium_unlocked,
-                   referral_unlocked, own_referral_code, created_at
-            FROM users
+            SELECT u.id, u.full_name, u.email, u.balance, u.is_admin, u.premium_unlocked,
+                   u.referral_unlocked, u.own_referral_code, u.created_at,
+                   COUNT(*) FILTER (WHERE ms.status = 'ready_to_ship')::int AS ready_to_ship_count,
+                   COUNT(*) FILTER (WHERE ms.status = 'delivered')::int AS delivered_count
+            FROM users u
+            LEFT JOIN my_shop ms ON ms.user_id = u.id
         `;
         const params = [];
 
@@ -30,14 +38,18 @@ async function getAllUsers(req, res) {
             params.push(`%${search}%`);
             // Agar search number hai, ID se bhi match karne ki koshish
             if (!isNaN(search)) {
-                query += ` WHERE id = $${params.length + 1} OR full_name ILIKE $1 OR email ILIKE $1`;
+                query += ` WHERE u.id = $${params.length + 1} OR u.full_name ILIKE $1 OR u.email ILIKE $1`;
                 params.push(search);
             } else {
-                query += ` WHERE full_name ILIKE $1 OR email ILIKE $1`;
+                query += ` WHERE u.full_name ILIKE $1 OR u.email ILIKE $1`;
             }
         }
 
-        query += ' ORDER BY created_at DESC';
+        query += `
+            GROUP BY u.id, u.full_name, u.email, u.balance, u.is_admin, u.premium_unlocked,
+                     u.referral_unlocked, u.own_referral_code, u.created_at
+            ORDER BY u.created_at DESC
+        `;
 
         const result = await pool.query(query, params);
         return res.status(200).json({ success: true, users: result.rows });
