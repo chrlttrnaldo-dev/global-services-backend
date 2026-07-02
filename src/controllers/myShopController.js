@@ -84,6 +84,9 @@ async function getMyShop(req, res) {
 
 // ============================================
 // USER: "Processing" button dabana
+// NAYA: Confirm karne se pehle check hota hai ke user ke
+// balance mein product ka pura amount (cost_price) hai ya nahi.
+// Agar kam hai to process nahi hone dete, error dikhate hain.
 // ============================================
 async function markAsProcessing(req, res) {
     try {
@@ -91,14 +94,31 @@ async function markAsProcessing(req, res) {
         const { shopItemId } = req.params;
 
         const itemResult = await pool.query(
-            'SELECT * FROM my_shop WHERE id = $1 AND user_id = $2',
+            `SELECT ms.*, p.cost_price, p.product_name, u.full_name
+             FROM my_shop ms
+             JOIN products p ON ms.product_id = p.id
+             JOIN users u ON ms.user_id = u.id
+             WHERE ms.id = $1 AND ms.user_id = $2`,
             [shopItemId, userId]
         );
         if (itemResult.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Order not found.' });
         }
-        if (itemResult.rows[0].status !== 'sold') {
+        const item = itemResult.rows[0];
+        if (item.status !== 'sold') {
             return res.status(400).json({ success: false, message: 'This order is not ready for processing yet.' });
+        }
+
+        // Balance check - user ke paas product ke cost jitna balance hona zaroori hai
+        const costPrice = parseFloat(item.cost_price);
+        const userResult = await pool.query('SELECT balance FROM users WHERE id = $1', [userId]);
+        const currentBalance = parseFloat(userResult.rows[0].balance);
+
+        if (currentBalance < costPrice) {
+            return res.status(400).json({
+                success: false,
+                message: `Your account does not have enough balance for this product's amount. Required: $${costPrice.toFixed(2)}, Available: $${currentBalance.toFixed(2)}.`,
+            });
         }
 
         await pool.query(
@@ -107,20 +127,11 @@ async function markAsProcessing(req, res) {
         );
 
         if (req.io) {
-            const infoResult = await pool.query(
-                `SELECT u.full_name, p.product_name
-                 FROM my_shop ms
-                 JOIN users u ON ms.user_id = u.id
-                 JOIN products p ON ms.product_id = p.id
-                 WHERE ms.id = $1`,
-                [shopItemId]
-            );
-            const info = infoResult.rows[0] || {};
             req.io.to('admin_room').emit('order_processing', {
                 shopItemId,
                 userId,
-                userName: info.full_name,
-                productName: info.product_name,
+                userName: item.full_name,
+                productName: item.product_name,
             });
         }
 
